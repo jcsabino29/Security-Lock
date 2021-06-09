@@ -6,7 +6,7 @@ import time
 # A* with misplaced tile
 # A* with Manhattan Distance
 
-# Solution to the puzzle.
+# Solution to the puzzle. Initialized global variable.
 GOAL_STATE = [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '0']]
 
 class Problem:
