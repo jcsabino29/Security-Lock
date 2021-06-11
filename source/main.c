@@ -1,27 +1,28 @@
-/*	Author: lab
- *  Partner(s) Name: Jhaymar Sabino 
- *	Lab Section: 023
- *	Assignment: Lab #11 Exercise #3
- *      Demo Link: https://drive.google.com/file/d/1cH11ZQZ0MLxmZqDtfVczdDFvAruH1KWT/view?usp=sharing
+/*	Author: Jhaymar Sabino
+ *      Demo Link: https://drive.google.com/file/d/1Gm1g2Y7xnYnTuK6v4kVCWoYnokp6De6U/view?usp=sharing
  *	Exercise Description: Extra addition function,
 If '#' is pressed then PB3 will light up and the button is ready for the combination, else nothing happens.
 If the right combination is being inputted PB2 will light up as long as it's pressed then goes back to PB3
 
 When inputting a new combination PB0 and PB1 lights up when a button on the keypad is being pressed, it takes in 4 inputs and replaces the old password.
  *
- *	I acknowledge all content contained herein, excluding template or example
- *	code, is my own original work.
  */
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #ifdef _SIMULATE_
 #include "simAVRHeader.h"
-#include "scheduler.h"
-#include <time.h>
-#include <stdlib.h>
 #include "keypad.h"
-
+#include "scheduler.h"
 #endif
+#define C4 2616.13
+#define D4 2939.66
+#define E4 3290.63
+#define F4 3490.23
+#define G4 3920.00
+#define A4 4400.00
+#define B4 4930.88
+#define C5 5230.25
+
 volatile unsigned char TimerFlag = 0;
 
 unsigned long _avr_timer_M = 1;
@@ -58,685 +59,273 @@ void TimerSet(unsigned long M) {
 	_avr_timer_cntcurr = _avr_timer_M;
 }
 
+void set_PWM(double frequency) {
+	static double current_frequency;
+	if (frequency != current_frequency) {
+		if (!frequency) { TCCR3B &= 0x08;
+		} else { TCCR3B |= 0x03; }
 
-//   Global Variable Initialization    //
-unsigned char ai_pos = 0x0E; 
-unsigned char player_pos = 0x0E;
-unsigned char level = 1;
-static unsigned char ball_row = 0x04;
-static unsigned char ball_col = 0x40;
-unsigned char movingRight = 0;
-unsigned char movingUp = 0;
-static unsigned char speed = 500;
-unsigned char spin = 0;
-static unsigned char play = 0;
-unsigned char player1_score = 0;
-unsigned char player2_score = 0;
-unsigned char player1_won, player2_won;
-unsigned char display_score = 0;
-unsigned char display_menu = 1;
-unsigned char restart = 0;
-unsigned char isMulti = 0;
-////////////////////////////////////////
+		if (frequency < 0.954) { OCR3A = 0xFFFF;
+		} else if (frequency > 31250) { OCR3A = 0x000;
+		} else { OCR3A = (short) (80000000 / (128 * frequency)) - 1; } 
+		
+		TCNT3 = 0;
+		current_frequency = frequency;
+	}
+}
 
+void PWM_on() {
+	TCCR3A = (1 << COM3A0);
+	TCCR3B = (1 << WGM32) | (1 << CS31) | (1 << CS30);
+	set_PWM(0);
+}
 
-enum SM_States { SM_Start, SM_Play };
-int AI_Tick(int state) {
-	int r = rand();
-	if (~PINA & 0x04) {
-	   level = level + 1;
-	} else { }
+void PWM_off() {
+	TCCR3A = 0x00;
+	TCCR3B = 0x00;
+}
+
+static unsigned newCombo = 0;
+static unsigned char x = 0;
+unsigned char password[5] = {'1', '2', '3', '4', '5'};
+static int i = 0;
+enum keyPadSM_State { SM_Start, SM_Lock, SM_Unlock };
+int keyPadSMTick(int state) {
+	static unsigned char press = 0;
+	static unsigned char sz = 0;
 	switch(state) {
 	   case(SM_Start):
-		if (play) {
-		   state = SM_Play;
+		if (newCombo) {
+		  sz = 4;
+		} else { sz = 5; } 		
+
+		if ((GetKeypadKey() == '#') && (~PINB & 0x80) != 0x80) {
+		   while(GetKeypadKey() == '#');
+		   state = SM_Unlock;
+		} else if ((~PINB & 0x80) == 0x80) {
+		   state = SM_Lock;
 		} else { }
-		ai_pos = 0x0E;
-		break;
+		//PORTB = 0x00;
+ 		break;
 	   default:
 		break;
 	}
 
 	switch(state) {
-	   case(SM_Start):
-		break;
-	   case(SM_Play):
-		//Row Shifting
-	 	if ((r % 100) <= (level * 30)) {
-		   if ((ball_row & ai_pos) == 0) { //if ai pong is not lined up
-			if ((ai_pos << 1) & ball_row) {
-			   if (ai_pos == 0x1C) {
-				ai_pos = 0x1C;
-			   } else {
-			   	ai_pos = ai_pos << 1;
+	   case(SM_Lock):
+		PORTB = 0x00;
+		state = SM_Start;
+ 		break;
+	   case(SM_Unlock):
+		PORTB = 0x08;
+		//for (int i = 0; i < 5; i++) { //Increments i
+		//   while(!GetKeypadKey()); //Wait for input
+		   x = GetKeypadKey();
+		   if (x) {
+			press = 1;
+			//PORTB = 0x00;
+		   } else { press = 0; }
+		   while(GetKeypadKey()) { //While button is being held
+		   	PORTB = 0x00;
+		   }
+
+		   //It has gone through the entire array == unlock
+		   if (i == sz) {
+			PORTB = 0x01; //Unlock
+			i = 0;
+			state = SM_Start;
+		   } else { }		
+
+		   //Only run if button has been pressed
+		   if (press) { 
+	  		   if(password[i] == x) {
+				PORTB = 0x04;
+				i = i + 1;
+		  	   } else {
+			   	//PORTB = 0x01;
+			   	i = 0;	//resets counter
+				state = SM_Start;
 			   }
-			} else {
-			   if (ai_pos == 0x07) {
-				ai_pos = 0x07;
-			   } else {
-			   	ai_pos = ai_pos >> 1;
-			   }
-			} 
 		   } else { }
-		} else {
-		   
-		}
-		if (!play) {
-		   //ai_pos = 0x0E;
-		   state = SM_Start;
-		} else { }
 		break;
 	   default:
 		break;
 	}
-	//ai_pos = row;
-	//ai = col;
+	/*
+	switch(x) {
+	   case('\0'):
+		PORTB = 0x1F;		
+	       	break;
+	   case('1'):
+		PORTB = 0x01;
+	      	break;
+	   case('2'):
+		PORTB = 0x02;
+	      	break;
+	   case('3'):
+		PORTB = 0x03;
+	      	break;
+	   case('4'):
+		PORTB = 0x04;
+	      	break;
+	   case('5'):
+		PORTB = 0x05;
+	      	break;
+	   case('6'):
+		PORTB = 0x06;
+	      	break;
+	   case('7'):
+		PORTB = 0x07;
+	      	break;
+	   case('8'):
+		PORTB = 0x08;
+	      	break;
+	   case('9'):
+		PORTB = 0x09;
+	      	break;
+	   case('#'):
+		PORTB = 0x0F;
+	      	break;
+	   default:
+		PORTB = 0x00;
+		break;
+	} */
 	return state;
 }
 
-enum playerSM {player_Start, player_Play};
-int Player_Tick(int state) {
+static unsigned char j = 0;
+static unsigned char counter = 0;
+static double frequency = 0;
+static unsigned char enterCombo = 0;
+double melody [15] = {F4, F4, C4, C4, D4, D4, D4, D4, C4, D4, E4, F4, C5, B4, F4 };
+enum doorbellSM_States { DB_Start, DB_Play, DB_ChLock };
+int doorbellSMTick (int state) {
+	/*PORTB = 0x0F;
+		if ((~PINA & 0x80) == 0x80) {
+		    PORTB = 0x00;
+		    state = DB_Play;
+		    //playing = 1;
+		} else { }*/
 	switch(state) {
-	   case(player_Start):
-		if (play) {
-		  state = player_Play;
+	   case(DB_Start):
+		//PORTB = 0x04;
+		if ((~PINA & 0x80) == 0x80) {
+		    PORTB = 0x08;
+		    state = DB_Play;
+		    //playing = 1;
+		} else if ((GetKeypadKey() == '#') && (~PINB & 0x80) == 0x80) {
+		    while((GetKeypadKey() == '#') || (~PINB & 0x80) == 0x80);
+	 	    state = DB_ChLock;
 		} else { }
-		player_pos = 0x0E;
 		break;
 	   default:
+		//PORTB = 0x01;
+		//state = DB_Start;
 		break;
 	}
 
 	switch(state) {
-	   case(player_Play):
-		if (~PINA & 0x01) {
-		    if (player_pos == 0x1C) {
-			player_pos = 0x1C;
-		     } else {
-			player_pos = player_pos << 1;
-		    }
-		} else if (~PINA & 0x02) {
-	 	   if (player_pos == 0x07) {
-			player_pos = 0x07;
-		   } else {
-			player_pos = player_pos >> 1;
-		   }
+	   case(DB_Play):
+		//while(playing) {
+		if (counter < 15) {
+		   frequency = melody[counter];
+		   set_PWM(frequency);
+		   PORTB = 0x02;
+		   counter = counter + 1;
 		} else {
-		  
+		   set_PWM(0);
+		   PORTB = 0x00;
+		   state = DB_Start;
+		   counter = 0;
 		}
-		if (!play) {
-		   state = player_Start;
-		} else { }
+		break;
+	   case(DB_ChLock):
+		x = GetKeypadKey();
+		if (x) {
+		   enterCombo = 1;
+		} else { enterCombo = 0; }
+
+		if (j >= 4) { j = 0; PORTB = 0x0A; state = DB_Start; newCombo = 1; }
+		else { }
+		if (enterCombo == 1) {
+			if (j < 4) {
+			   while(GetKeypadKey()) {
+			     password[j] = x;
+			     PORTB = 0x03;
+			   }
+			   j = j + 1;
+		  	} else { j = 0; PORTB = 0x0A; state = DB_Start; newCombo = 1; }
+		} else { PORTB = 0x00; } //T
 		break;
 	   default:
-		break;
-	} 
-	//player_pos = col;
-	//PORTC = 0x01;
-	//PORTD = ~player_pos;
-	return state;
-}
-
-enum player2SM {player2_Start, player2_Play};
-int Player2_Tick(int state) {
-	switch(state) {
-	   case(player2_Start):
-		if (play) {
-		  state = player_Play;
-		} else { }
-		ai_pos = 0x0E;
-		break;
-	   default:
-		break;
-	}
-
-	switch(state) {
-	   case(player2_Play):
-		if (GetKeypadKey() == '1') {
-		    if (ai_pos == 0x1C) {
-			ai_pos = 0x1C;
-		     } else {
-			ai_pos = ai_pos << 1;
-		    }
-		} else if (GetKeypadKey() == '2') {
-	 	   if (ai_pos == 0x07) {
-			ai_pos = 0x07;
-		   } else {
-			ai_pos = ai_pos >> 1;
-		   }
-		} else {
-		  
-		}
-		if (!play) {
-		   state = player2_Start;
-		} else { }
-		break;
-	   default:
-		break;
-	} 
-	//player_pos = col;
-	//PORTC = 0x01;
-	//PORTD = ~player_pos;
-	return state;
-}
-
-enum ballSM_State { ballSM_Start, ballSM_Play };
-int Ball_Tick(int state) {
-    unsigned char row = ball_row;
-    unsigned char col = ball_col;
-     switch (state) {
-     case(ballSM_Start):
-	if (play) {
-	  state = ballSM_Play;
-	} else { }
-	ball_row = 0x04;
-	ball_col = 0x40;
-	break;
-     default:
-	//state = ballSM_Start;
-	break;
-}
-
-     switch (state) {
-     case(ballSM_Play):
-	    //vertical
-	    if (movingUp) {
-	    	if ((col == 0x02) && (ai_pos & row)) { //if I hit the ping pong
-		    movingUp = 0;
-		    col = col << 1;
-		    if (!((row << 1) & ai_pos) || !((row >> 1) & ai_pos)) {
-			if (movingRight) {
-			   movingRight = 0;
-			} else {
-			   movingRight = 1;
-			}
-		    spin = 1;
-		    } else {
-		    spin = 0;
-		    }
-		} else if (col == 0x01) {
-		    col = col >> 1;
-		    play = 0; //stop game;
-		    player1_score = player1_score + 1;
-		    display_score = 1;
-		    if (player1_score >= 3) {
-			player1_won = 1;
-			display_score = 0;
-			display_menu = 1;
-		    } else { }
-	    	} else {
-		    col = col >> 1;
-	    	}
-	    } else {  //moving left
-	    	if ((col == 0x40) && (player_pos & row)) { //if I hit the ping pong
-		    movingUp = 1;
-		    col = col >> 1;
-		    if (!((row << 1) & player_pos) || !((row >> 1) & player_pos)) {
-			if (movingRight) {
-			   movingRight = 0;
-			} else {
-			   movingRight = 1;
-			}
-		    	spin = 1; 
-		    } else {
-		    	spin = 0;
-		    }
-		} else if (col == 0x80) {
-		    col = col << 1;
-		    play = 0; //stop game;
-		    player2_score = player2_score + 1;
-		    display_score = 1;
-		    if (player2_score >= 3) {
-			player2_won = 1;
-			display_score = 0;
-			display_menu = 1;
-		    } else { }
-	    	} else {
-		    col = col << 1;
-	    	}
-	    }
-
-	    //sideways
-	    //If ball hits wall it no longer spins
-	    if (movingRight) {
-		if (spin) {
-		    	if (row == 0x01) { //if I hit the right wall
-			    movingRight = 0;
-			    row = row << 1;
-			    speed = 500;
-			    spin = 0;
-			    //col = col >> 1;
-		    	} else {
-			    row = row >> 1;
-			    movingRight = 0;
-			    spin = 0;
-			    speed = speed - 100;
-		    	}
-		} else {
-			speed = 500;
-		    	if (row == 0x01) { //if I hit the right wall
-			    movingRight = 0;
-			    row = row << 1;
-			    //col = col >> 1;
-		    	} else {
-			    row = row >> 1;
-		    	}
-		}
-	    } else {  //moving left
-		if (spin) {
-		    	if (row == 0x10) { //if I hit the left wall
-			    movingRight = 0;
-			    row = row >> 1;
-			    speed = 500;
-			    spin = 0;
-		    	} else {
-			    row = row << 1;
-			    spin = 0;
-			    movingRight = 1;
-			    speed = speed - 100;
-		    	}
-		} else {
-			speed = 500;
-		    	if (row == 0x10) { //if I hit the left wall
-			    movingRight = 1;
-			    row = row >> 1;
-			    //col = col >> 1;
-		    	} else {
-			    row = row << 1;
-		    	}
-		}
-	    }
-
-	    if (~PINA & 0x08) {
-		play = 0;
-		display_menu = 1;
-	 	display_score = 0;
-	    } else { }
-
-	    /*if (!play) {
-		ball_row = 0x04;
-		ball_col = 0x40;
-		state = ballSM_Start;
-	    } else { }*/
-	break;
-     default:
-	//state = ballSM_Start;
-	break;
-}
-     ball_row = row;
-     ball_col = col;
-     //PORTC = col;
-     //PORTD = ~row;
-     return state;
-}
-
-//void test_ball(unsigned char *ballRow, unsigned char *ballCol) {
-void test_ball() {
-    unsigned char row = ball_row;
-    unsigned char col = ball_col;
-    //test move up
-    //vertical
-    if (movingUp) {
-    	if ((col == 0x02) && (ai_pos & row)) { //if I hit the ping pong
-	    movingUp = 0;
-	    col = col << 1;
-	    //col = col >> 1;
-	} else if (col == 0x01) {
-	    col = col >> 1;
-	    //stop game;
-    	} else {
-	    col = col >> 1;
-    	}
-    } else {  //moving left
-    	if ((col == 0x40) && (player_pos & row)) { //if I hit the ping pong
-	    movingUp = 1;
-	    col = col >> 1;
-	} else if (col == 0x10) {
-	    col = col << 1;
-	    //stop game;
-    	} else {
-	    col = col << 1;
-    	}
-    }
-
-    //sideways
-    if (movingRight) {
-    	if (row == 0x01) { //if I hit the right wall
-	    movingRight = 0;
-	    row = row << 1;
-	    //col = col >> 1;
-    	} else {
-	    row = row >> 1;
-    	}
-    } else {  //moving left
-    	if (row == 0x10) { //if I hit the left wall
-	    movingRight = 1;
-	    row = row >> 1;
-    	} else {
-	    row = row << 1;
-    	}
-    }
-    
-    
-    //*ballRow = ~row;
-    //row = ( row << 1);
-    ball_row = row;
-    ball_col = col;
-    PORTD = ~row;
-    PORTC = col;
-}
-
-int sz = 5;
-unsigned char pattern[3] = {0x07, 0x0E};
-unsigned char cols[5] = { 0x01, 0x80, 0xFF};
-unsigned char j = 0;
-enum game_Tick { game_Start, game_Play, game_Score, game_Menu };
-int Game_Tick(int state) {
-   if ((player1_won || player2_won) & !(display_menu)) {
-	player1_won = 0;
-	player2_won = 0;
-	player1_score = 0;
-	player2_score = 0;
-	display_menu = 1;
-	display_score = 0;
-	state = game_Menu;
-   } else { }
-
-   if (~PINA & 0x08) {
-	player1_won = 0;
-	player2_won = 0;
-	player1_score = 0;
-	player2_score = 0;
-	display_menu = 1;
-	display_score = 0;
-	state = game_Menu;
-   } else { }
-
-   /*if (display_score) {
-	state = game_Score;
-   } else { }*/
-
-   switch(state) {
-     case(game_Start):
-	//state = game_Start;
-	if (~PINA & 0x01) {
-	  state = game_Play;
-	  play = 1;
-	} else if (display_menu) {
-	  state = game_Menu;
-	} else {
-	  state = game_Start;
-	  play = 0;
-	}
-	level = 1;
-	PORTC = cols[(j % 3)];
-	//PORTC = ai_pos;
-	if (cols[j % 3] == 0x01) {
-	   PORTD = ~0x0E; 
-	} else if (cols[j % 3] == 0x80) {
-	   PORTD = ~0x0E;
-	} else {
-	   PORTD = ~(0x04);
-	   PORTC = 0x40;
-	}
-	player_pos = 0x0E;
-	ai_pos = 0x0E;
-	ball_row = 0x04;
-	ball_col = 0x40;
-	//PORTC = pattern[(j % 2)];
-	j = j + 1;
-
-	/*if (display_score) {
-	   state = game_Score;
-	} else { }*/
-	break;
-     case(game_Score):
-	if (!display_score) {
-	   state = game_Start;
-	} else {
-	   state = game_Score;
-	} 
-	break;
-     case(game_Menu):
-	if (!display_menu) {
-	   state = game_Start;
-	} else {
-	 
-	} 
-	break;
-     default:
-	//state = game_Start;
-	break;
-   }
-
-   switch(state) {
-     case(game_Play):
-	PORTC = cols[(j % 3)];
-	//PORTC = ai_pos;
-	if (cols[j % 3] == 0x01) {
-	   PORTD = ~ai_pos; 
-	} else if (cols[j % 3] == 0x80) {
-	   PORTD = ~player_pos;
-	} else {
-	   PORTD = ~ball_row;
-	   PORTC = ball_col;
-	}
-	j = j + 1;
-	if (!play) {
-	  state = game_Score;
-	} else { }
-
-	if (display_score) {
-	  state = game_Score;
-	} else { } 
-
-	if (display_menu) {
-	  state = game_Menu;
-	} else { }
-	break;
-     default:
-	break;
-   }
-   return state;
-}
-
-unsigned char scores[10] = {0x80, 0x40, 0x20, 0x04, 0x02, 0x01};
-unsigned char patterns[30] = { 0x1F, 0x11, 0x1F, 0x00, 0x1F, 0x00, 0x1D, 0x15, 0x17, 0x11, 0x15, 0x1F, 0x07, 0x04, 0x1F, 0x17, 0x15, 0x1D, 0x1F, 0x15, 0x1D, 0x01, 0x01, 0x1F, 0x1F, 0x15, 0x1F, 0x07, 0x05, 0x1F };  
-//unsigned char one[3] = {0x00, 0x1F, 0x00};   //1
-//unsigned char two[3] = {0x1D, 0x15, 0x17};  //2
-//unsigned char three[3] = {0x15, 0x15, 0x1F};  //3
-//unsigned char four[3] = {0x07, 0x04, 0x1F};  //4
-//unsigned char five[3] = {0x17, 0x15, 0x1D,}; //5
-//unsigned char six[3] = {0x1F, 0x15, 0x1D,}; //6
-//unsigned char seven[3] = {0x01, 0x01, 0x1F,}; //7
-//unsigned char eight[3] = {0x1F, 0x15, 0x1F,}; //8
-//unsigned char nine[30] = {0x07, 0x05, 0x1F,}; //9
-unsigned char counter_row = 0;
-unsigned char counter_col = 0;
-
-enum score_SM {score_Start, score_Display};
-int score_Tick(int state) {
-	unsigned char player1_tmp = 0;
-	unsigned char player2_tmp = 0;
-	player1_tmp = player1_score * 3;
-	player2_tmp = player2_score * 3;
-	switch (state) {
-	   case(score_Start):
-		if (display_score) {
-		   state = score_Display;
-		} else {
-		   state = score_Start;
-		   display_score = 0;
-		}
-		break;
-	   default:
-		break;
-	}
-
-	switch (state) {
-	   case(score_Display):
-		PORTC = scores[counter_row];
-		if (counter_row < 3) {
-		    PORTD = ~patterns[counter_row + (player1_tmp)];
-		} else {
-		    PORTD = ~patterns[counter_row - 3 + (player2_tmp)];
-		}
-		counter_row = counter_row + 1;
-		if (GetKeypadKey() == '#' || !display_score) {
-		    display_score = 0;
-		    state = score_Start;
-		} else { }
-		break;
-	   default:
+		//state = DB_Start;
 		break;
 	}
 	return state;
 }
-
-enum display_SM {display_Start, display_Display};
-int display_Tick(int state) {
-	unsigned multi_tmp = 0;
-	switch (state) {
-	   case(display_Start):
-		if (display_menu) {
-		   state = display_Display;
-		} else {
-		   state = display_Start;
-		   //display_score = 0;
-		}
-		break;
-	   default:
-		break;
-	}
-
-	switch (state) {
-	   case(display_Display):
-		if (GetKeypadKey() == '3') {
-		    isMulti = 0;
-		} else if (GetKeypadKey() == '4') {
-		    isMulti = 1;
-		} else { }
-		multi_tmp = (isMulti + 1) * 3;
-		PORTC = scores[counter_row % 3] >> 3;
-		PORTD = ~patterns[counter_row % 3 + (multi_tmp)];
-		counter_row = counter_row + 1;
-		if (GetKeypadKey() == '0') {
-		    display_menu = 0;
-		    state = display_Start;
-		} else { }
-		break;
-	   default:
-		break;
-	}
-	return state;
-}
-
-void display_test() {
-	unsigned multi_tmp = 0;
-	//3 in keypad selects how many multipplayers
-	if (GetKeypadKey() == '3') {
-	    isMulti = 0;
-	} else if (GetKeypadKey() == '4') {
-	    isMulti = 1;
-	} else { }
-	multi_tmp = (isMulti + 1) * 3;
-	PORTC = scores[counter_row % 3] >> 3;
-	PORTD = ~patterns[counter_row % 3 + (multi_tmp)];
-	counter_row = counter_row + 1;
-}
-
-
-/*void display_score() {
-		unsigned char player1_tmp = 0;
-		unsigned char player2_tmp = 0;
-		player1_tmp = player1_score * 3;
-		player2_tmp = player2_score * 3;
-		PORTC = scores[counter_row];
-		if (counter_row < 3) {
-		    PORTD = ~patterns[counter_row + (player1_tmp)];
-		} else {
-		    PORTD = ~patterns[counter_row - 3 + (player2_tmp)];
-		}
-		counter_row = counter_row + 1;
-		state = score_Start;
-}*/
-
-/*
-unsigned char menu[10] = { }
-unsigned char menu_counter = 0;
-void display_menu() {
-	PORTC = 0x80 >> menu_counter
-	PORTD = ~menu[menu_counter];
-}*/
 
 int main(void) {
     /* Insert DDR and PORT initializations */
-	DDRB = 0xF0; PORTB = 0x0F;
-	DDRC = 0xFF; PORTC = 0x00;
+	DDRB = 0x4F; PORTB = 0xB0;
+	DDRC = 0xF0; PORTC = 0x0F;
 	DDRA = 0x00; PORTA = 0xFF;
-	DDRD = 0xFF; PORTD = 0x00;
 	//SM Initializations
 
 	//Declare an array of tasks
 	static task task1, task2, task3, task4, task5, task6;
 	task *tasks[] = { &task1, &task2, &task3, &task4, &task5, &task6};
+	//task *tasks[] = {&task1};
 	const unsigned char numTasks = sizeof(tasks)/sizeof(task*);
 
 	const char start = 0;
-	//Task 1 
+	//Task 1 pauseButtonToggleSM
 	task1.state = start;
-	task1.period = 1;
+	task1.period = 200;
 	task1.elapsedTime = task1.period;
-	task1.TickFct = &Game_Tick;
+	task1.TickFct = &pauseButtonToggleSMTick;
 
-	//Task 2
+	//Task 2 toggleLED0SMTick
 	task2.state = start;
-	task2.period = speed;
-	task2.elapsedTime = task1.period;
-	task2.TickFct = &Ball_Tick;
+	task2.period = 600;
+	task2.elapsedTime = task2.period;
+	task2.TickFct = &toggleLED0SMTick;
 
-	//Task 3 
+	//Task 3 toggleLED1SM1Tick
 	task3.state = start;
-	task3.period = 300;
-	task3.elapsedTime = task1.period;
-	task3.TickFct = &Player_Tick;
+	task3.period = 1000;
+	task3.elapsedTime = task3.period;
+	task3.TickFct = &toggleLED1SMTick;
 
-	//Task 4 
+	//Task 4 displaySMTick
 	task4.state = start;
-	task4.period = 300;
-	task4.elapsedTime = task1.period;
-	task4.TickFct = &Player2_Tick;
+	task4.period = 50;
+	task4.elapsedTime = task3.period;
+	task4.TickFct = &displaySMTick;
 
-	//Task 5 
+	//Task 5 keyPadSMTick
 	task5.state = start;
-	task5.period = 1;
-	task5.elapsedTime = task1.period;
-	task5.TickFct = &score_Tick;
+	task5.period = 200;
+	task5.elapsedTime = task5.period;
+	task5.TickFct = &keyPadSMTick;
 
-	//Task 6 
+	//Task 6 doorbellSMTick
 	task6.state = start;
-	task6.period = 1;
-	task6.elapsedTime = task1.period;
-	task6.TickFct = &display_Tick;
+	task6.period = 200;
+	task6.elapsedTime = task6.period;
+	task6.TickFct = &doorbellSMTick;
 
 	//Variable Initialization
 	unsigned long GCD = tasks[0]->period;
-	unsigned char i = 0;
-	srand(time(NULL));
+	//unsigned char x = 0;
 
 	//Timer Initialization
 	TimerSet(GCD);
 	TimerOn();
+	PWM_on();
+
     /* Insert your solution below */
     while (1) {
-	if (display_menu) {
-		if (isMulti) {
-			task4.TickFct = &Player2_Tick;
-		} else {
-			task4.TickFct = &AI_Tick;
-		}
-	}
-
+	//TimerSet(10);
 	for ( int i = 0; i < numTasks; i++ ) {
 		if ( tasks[i]->elapsedTime == tasks[i]->period ) {
 			tasks[i]->state = tasks[i]->TickFct(tasks[i]->state);
@@ -745,22 +334,21 @@ int main(void) {
 		GCD = findGCD(GCD, tasks[i]->period);
 		tasks[i]->elapsedTime += GCD;
 	}
-	//display_test();
 
-
-	//void display_menu();
-	/*if (menu_counter >= 8) {
-		menu_counter = 0;
-	} else {
-		menu_counter = menu_counter + 1;
-	}*/
-	/*player1_score = 3;
-	player2_score = 9;
-	display_score();*/
-	if (counter_row == 6) {
-		counter_row = 0;
-	}
-	//counter_ = 0x80;
+	/*if ((GetKeypadKey() == '#') && (~PINB & 0x80) != 0x80) {
+	   /*while(GetKeypadKey() == '#') {
+	   //state = SM_Unlock;
+		   if (~(~PINA & 0x01)) {
+			PORTB = 0x02;
+		   } else if (~PINA & 0x01) {
+			PORTB = 0x04;
+		   } else { PORTB = 0x08; }
+	   }
+	   PORTB = 0x02;
+	} else if ((GetKeypadKey() == '#') && (~PINB & 0x80) == 0x80) {
+	   //state = SM_Lock;
+	   PORTB = 0x01;
+	} else { PORTB = 0x06; }*/
 	while(!TimerFlag);
 	TimerFlag = 0;
     }
